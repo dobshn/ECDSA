@@ -11,8 +11,12 @@
 #else
 #include <stdlib.h>
 #endif
+#include <gmp.h>
 #include "ecdsa.h"
 #include "sha2.h"
+
+static mpz_t p, n;
+static ecdsa_p256_t *G;
 
 /*
  * Initialize 256 bit ECDSA parameters
@@ -20,6 +24,21 @@
  */
 void ecdsa_p256_init(void)
 {
+    // p 공간 할당 및 초기화
+    mpz_init_set_str(p, "FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF", 16);
+
+    // n 공간 할당 및 초기화
+    mpz_init_set_str(n, "FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", 16);
+    
+    // G 공간 할당 및 초기화
+    G = malloc(sizeof(ecdsa_p256_t));
+    mpz_t Gx, Gy;
+    mpz_init_set_str(Gx, "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296", 16);
+    mpz_init_set_str(Gy, "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5", 16);
+    mpz_export(G->x, NULL, 1, 1, 0, 0, Gx);
+    mpz_export(G->y, NULL, 1, 1, 0, 0, Gy);
+    mpz_clear(Gx);
+    mpz_clear(Gy);
 }
 
 /*
@@ -28,6 +47,8 @@ void ecdsa_p256_init(void)
  */
 void ecdsa_p256_clear(void)
 {
+    mpz_clears(p, n);
+    free(G);
 }
 
 /*
