@@ -18,6 +18,42 @@
 static mpz_t p, n;
 static ecdsa_p256_t *G;
 
+static void mpz_addm(mpz_t rop, const mpz_t a, const mpz_t b, const mpz_t m)
+{
+    mpz_add(rop, a, b);
+    mpz_mod(rop, rop, m);
+}
+
+static void mpz_addm_ui(mpz_t rop, const mpz_t a, const unsigned long int b, const mpz_t m)
+{
+    mpz_add_ui(rop, a, b);
+    mpz_mod(rop, rop, m);
+}
+
+static void mpz_subm(mpz_t rop, const mpz_t a, const mpz_t b, const mpz_t m)
+{
+    mpz_sub(rop, a, b);
+    mpz_mod(rop, rop, m);
+}
+
+static void mpz_subm_ui(mpz_t rop, const mpz_t a, const unsigned long int b, const mpz_t m)
+{
+    mpz_sub_ui(rop, a, b);
+    mpz_mod(rop, rop, m);
+}
+
+static void mpz_mulm(mpz_t rop, const mpz_t a, const mpz_t b, const mpz_t m)
+{
+    mpz_mul(rop, a, b);
+    mpz_mod(rop, rop, m);
+}
+
+static void mpz_mulm_ui(mpz_t rop, const mpz_t a, const unsigned long int b, const mpz_t m)
+{
+    mpz_mul_ui(rop, a, b);
+    mpz_mod(rop, rop, m);
+}
+
 /*
  * Initialize 256 bit ECDSA parameters
  * 시스템파라미터 p, n, G의 공간을 할당하고 값을 초기화한다.
