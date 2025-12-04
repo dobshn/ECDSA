@@ -54,6 +54,27 @@ static void mpz_mulm_ui(mpz_t rop, const mpz_t a, const unsigned long int b, con
     mpz_mod(rop, rop, m);
 }
 
+/**
+ * @brief 주어진 점 P를 무한대 점(Point at Infinity, O)으로 설정한다.
+ * @param R 무한대 점으로 설정할 타원 곡선 점 포인터.
+ */
+static void set_infinite(ecdsa_p256_t *R) {
+    *R = (ecdsa_p256_t){0};
+}
+
+/**
+ * @brief 주어진 점 P가 무한대 점(Point at Infinity, O)인지 확인한다.
+ * @param P 검사할 타원 곡선 점.
+ * @return 무한대 점이면 1 (True), 아니면 0 (False)을 반환한다.
+ */
+static int is_infinite(const ecdsa_p256_t *P) {
+    const unsigned char *p = (const unsigned char *)P;
+    for (size_t i = 0; i < sizeof(ecdsa_p256_t); ++i) {
+        if (p[i] != 0) return 0;
+    }
+    return 1;
+}
+
 /*
  * Initialize 256 bit ECDSA parameters
  * 시스템파라미터 p, n, G의 공간을 할당하고 값을 초기화한다.
