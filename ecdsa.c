@@ -166,6 +166,29 @@ static int ecdsa_p256_point_add(ecdsa_p256_t *R, const ecdsa_p256_t *P, const ec
     return 0;
 }
 
+/**
+ * @brief P-256 타원 곡선 위에서 스칼라 k와 점 P를 곱하여 결과 R = kP를 계산한다.
+ * @param R 결과 점 kP가 저장될 점 포인터.
+ * @param k GMP mpz_t 타입으로 표현된 스칼라.
+ * @param P 곱셈을 수행할 입력 점.
+ */
+static void ecdsa_p256_scalar_mul(ecdsa_p256_t *R, const mpz_t k, const ecdsa_p256_t *P) {
+    ecdsa_p256_t Q = *P;
+    mpz_t kk;
+
+    mpz_init_set(kk, k);
+    mpz_mod(kk, kk, n);
+    set_infinite(R);
+
+    while (mpz_sgn(kk) > 0) {
+        if (mpz_tstbit(kk, 0)) ecdsa_p256_point_add(R, R, &Q);
+        ecdsa_p256_point_add(&Q, &Q, &Q);
+        mpz_fdiv_q_2exp(kk, kk, 1);
+    }
+
+    mpz_clear(kk);
+}
+
 /*
  * Initialize 256 bit ECDSA parameters
  * 시스템파라미터 p, n, G의 공간을 할당하고 값을 초기화한다.
