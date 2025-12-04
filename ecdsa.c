@@ -75,6 +75,97 @@ static int is_infinite(const ecdsa_p256_t *P) {
     return 1;
 }
 
+/**
+ * @brief P-256 타원 곡선 위에서 두 점 P와 Q를 더하여 결과를 R에 저장한다.
+ *
+ * 점 덧셈 규칙은 다음과 같다:
+ *  - P 또는 Q가 무한대 점이면, 다른 점을 반환한다.
+ *  - P.x == Q.x:
+ *      * P.y == Q.y 이면 점 배가(Point Doubling)를 수행한다.
+ *      * P.y != Q.y 이면 결과는 무한대 점이다.
+ *  - 그 외에는 일반적인 점 덧셈(Point Addition) 공식을 사용한다.
+ *
+ * @param R 결과가 저장될 점 포인터.
+ * @param P 첫 번째 입력 점.
+ * @param Q 두 번째 입력 점.
+ * @return 항상 0을 반환한다.
+ */
+static int ecdsa_p256_point_add(ecdsa_p256_t *R, const ecdsa_p256_t *P, const ecdsa_p256_t *Q) {
+    // P, Q중 어느 한 점이라도 무한대 점이라면, 상대방을 반환한다.
+    if (is_infinite(P)) {
+        *R = *Q;
+        return 0;
+    }
+    if (is_infinite(Q)) {
+        *R = *P;
+        return 0;
+    }
+
+    mpz_t Rx, Ry, Px, Py, Qx, Qy;
+    mpz_t lambda, t1, t2;
+
+    mpz_inits(Rx, Ry, Px, Py, Qx, Qy, NULL);
+    mpz_inits(lambda, t1, t2, NULL);
+
+    mpz_import(Px, ECDSA_P256/8, 1, 1, 0, 0, P->x);
+    mpz_import(Py, ECDSA_P256/8, 1, 1, 0, 0, P->y);
+    mpz_import(Qx, ECDSA_P256/8, 1, 1, 0, 0, Q->x);
+    mpz_import(Qy, ECDSA_P256/8, 1, 1, 0, 0, Q->y);
+
+    if (mpz_cmp(Px, Qx) == 0) {
+        // x좌표가 같고, y좌표가 같다 -> 같은 점이다.
+        if (mpz_cmp(Py, Qy) == 0) {
+            // t1 = (3*Px^2 - 3) mod p
+            mpz_mulm(t1, Px, Px, p);
+            mpz_mulm_ui(t1, t1, 3, p);
+            mpz_subm_ui(t1, t1, 3, p);
+
+            // t2 = (2*Py)^(-1) mod p
+            mpz_addm(t2, Py, Py, p);
+            mpz_invert(t2, t2, p);
+            
+            // lambda = (3*Px^2 - 3) * (2*Py)^(-1) mod p
+            mpz_mulm(lambda, t1, t2, p);
+        }
+        // x좌표가 같고, y좌표가 다르다 -> 무한대 점을 반환한다.
+        else {
+            set_infinite(R);
+            mpz_clears(Rx, Ry, Px, Py, Qx, Qy, NULL);
+            mpz_clears(lambda, t1, t2, NULL);
+            return 0;
+        }
+    }
+    // x좌표가 다르다 -> 서로 다른 두 점이다.
+    else {
+        // t1 = (Qy - Py) mod p
+        mpz_subm(t1, Qy, Py, p);
+
+        // t2 = (Qx - Px)^(-1) mod p
+        mpz_subm(t2, Qx, Px, p);
+        mpz_invert(t2, t2, p);
+
+        // lambda = (Qy - Py) * (Qx - Px)^(-1) mod p
+        mpz_mulm(lambda, t1, t2, p);
+    }
+
+    // Rx = lambda^2 - Px - Qx
+    mpz_mulm(Rx, lambda, lambda, p);
+    mpz_subm(Rx, Rx, Px, p);
+    mpz_subm(Rx, Rx, Qx, p);
+
+    // Ry = lambda * (Px - Rx) - Py
+    mpz_subm(Ry, Px, Rx, p);
+    mpz_mulm(Ry, lambda, Ry, p);
+    mpz_subm(Ry, Ry, Py, p);
+
+    mpz_export(R->x, NULL, 1, 1, 0, 0, Rx);
+    mpz_export(R->y, NULL, 1, 1, 0, 0, Ry);
+
+    mpz_clears(Rx, Ry, Px, Py, Qx, Qy, NULL);
+    mpz_clears(lambda, t1, t2, NULL);
+    return 0;
+}
+
 /*
  * Initialize 256 bit ECDSA parameters
  * 시스템파라미터 p, n, G의 공간을 할당하고 값을 초기화한다.
