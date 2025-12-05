@@ -16,9 +16,6 @@
 #include "ecdsa.h"
 #include "sha2.h"
 
-static mpz_t p, n;
-static ecdsa_p256_t *G;
-
 /* ============================= *
  *          mpz_t 연산            *
  * ============================= */
@@ -60,12 +57,12 @@ static void mpz_from_bytes(mpz_t z, const void *bytes)
 
 static void bytes_from_mpz(void *bytes, const mpz_t z)
 {
-    unsigned char tmp[ECDSA_P256/8] = {0};
+    unsigned char buf[ECDSA_P256/8] = {0};
     size_t count = 0;
 
-    mpz_export(tmp, &count, 1, 1, 0, 0, z);
+    mpz_export(buf, &count, 1, 1, 0, 0, z);
     memset(bytes, 0, ECDSA_P256/8);
-    memcpy((unsigned char *)bytes + (ECDSA_P256/8 - count), tmp, count);
+    memcpy((unsigned char *)bytes + (ECDSA_P256/8 - count), buf, count);
 }
 
 /* ============================= *
@@ -216,52 +213,32 @@ static void sha2(const unsigned char *msg, unsigned int len, unsigned char *dige
     }
 }
 
-/* ------------------------------ ecdsa 연산 ------------------------------------- */
+/* ============================= *
+ *          ecdsa 연산            *
+ * ============================= */
 
-static int too_long(size_t len, int sha2_ndx)
-{
-    if ((sha2_ndx == SHA224 || sha2_ndx == SHA256) &&
-        len > 0x1fffffffffffffffULL) return 1;
-    return 0;
-}
+static mpz_t p, n; 
+static ecdsa_p256_t G;
 
-/*
- * Initialize 256 bit ECDSA parameters
- * 시스템파라미터 p, n, G의 공간을 할당하고 값을 초기화한다.
- */
 void ecdsa_p256_init(void)
 {
-    // p 공간 할당 및 초기화
-    mpz_init_set_str(p, "FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF", 16);
-
-    // n 공간 할당 및 초기화
-    mpz_init_set_str(n, "FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", 16);
-    
-    // G 공간 할당 및 초기화
-    G = malloc(sizeof(ecdsa_p256_t));
     mpz_t Gx, Gy;
-    mpz_init_set_str(Gx, "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296", 16);
-    mpz_init_set_str(Gy, "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5", 16);
-    bytes_from_mpz(G->x, Gx);
-    bytes_from_mpz(G->y, Gy);
-    mpz_clear(Gx);
-    mpz_clear(Gy);
+    
+    mpz_init_set_str(p,  "FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF", 16);
+    mpz_init_set_str(n,  "FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", 16);
+
+    mpz_inits(Gx, Gy, NULL);
+    mpz_set_str(Gx, "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296", 16);
+    mpz_set_str(Gy, "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5", 16);
+    point_from_mpz(&G, Gx, Gy);
+    mpz_clears(Gx, Gy, NULL);
 }
 
-/*
- * Clear 256 bit ECDSA parameters
- * 할당된 파라미터 공간을 반납한다.
- */
 void ecdsa_p256_clear(void)
 {
     mpz_clears(p, n, NULL);
-    free(G);
 }
 
-/*
- * ecdsa_p256_key() - generates Q = dG
- * 사용자의 개인키와 공개키를 무작위로 생성한다.
- */
 void ecdsa_p256_key(void *d, ecdsa_p256_t *Q)
 {
     unsigned char buf[ECDSA_P256/8];
@@ -270,25 +247,19 @@ void ecdsa_p256_key(void *d, ecdsa_p256_t *Q)
     mpz_init(dd);
     do {
         arc4random_buf(buf, sizeof(buf));
-        mpz_import(dd, sizeof(buf), 1, 1, 0, 0, buf);
+        mpz_from_bytes(dd, buf);
         mpz_mod(dd, dd, n);
     } while (mpz_cmp_ui(dd, 0) == 0);
 
     bytes_from_mpz(d, dd);
-    point_scalar_mul(Q, dd, G);
+    point_scalar_mul(Q, dd, &G);
+
     mpz_clear(dd);
 }
 
-/*
- * ecdsa_p256_sign(msg, len, d, r, s) - ECDSA Signature Generation
- * 길이가 len 바이트인 메시지 m을 개인키 d로 서명한 결과를 r, s에 저장한다.
- * sha2_ndx는 사용할 SHA-2 해시함수 색인 값으로 SHA224, SHA256, SHA384, SHA512,
- * SHA512_224, SHA512_256 중에서 선택한다. r과 s의 길이는 256비트이어야 한다.
- * 성공하면 0, 그렇지 않으면 오류 코드를 넘겨준다.
- */
 int ecdsa_p256_sign(const void *msg, size_t len, const void *d, void *_r, void *_s, int sha2_ndx)
 {
-    if (too_long(len, sha2_ndx)) return ECDSA_MSG_TOO_LONG;
+    if ((sha2_ndx == SHA224 || sha2_ndx == SHA256) && len >= 0x2000000000000000) return ECDSA_MSG_TOO_LONG;
 
     mpz_t e, dd, k, r, s, tmp;
     mpz_inits(e, dd, k, r, s, tmp, NULL);
@@ -321,7 +292,7 @@ int ecdsa_p256_sign(const void *msg, size_t len, const void *d, void *_r, void *
         if (mpz_cmp_ui(k, 0) == 0) continue;
 
         // kG를 계산한다.
-        point_scalar_mul(&P, k, G);
+        point_scalar_mul(&P, k, &G);
         mpz_import(r, ECDSA_P256/8, 1, 1, 0, 0, P.x);
         mpz_mod(r, r, n);
         if (mpz_cmp_ui(k, 0) == 0) continue;
@@ -342,15 +313,9 @@ int ecdsa_p256_sign(const void *msg, size_t len, const void *d, void *_r, void *
     return 0;
 }
 
-/*
- * ecdsa_p256_verify(msg, len, Q, r, s) - ECDSA signature veryfication
- * It returns 0 if valid, nonzero otherwise.
- * 길이가 len 바이트인 메시지 m에 대한 서명이 (r,s)가 맞는지 공개키 Q로 검증한다.
- * 성공하면 0, 그렇지 않으면 오류 코드를 넘겨준다.
- */
 int ecdsa_p256_verify(const void *msg, size_t len, const ecdsa_p256_t *_Q, const void *_r, const void *_s, int sha2_ndx)
 {
-    if (too_long(len, sha2_ndx)) return ECDSA_MSG_TOO_LONG;
+    if ((sha2_ndx == SHA224 || sha2_ndx == SHA256) && len >= 0x2000000000000000) return ECDSA_MSG_TOO_LONG;
     
     /*
      * 1. r과 s가 [1, n−1] 사이에 있지 않으면 잘못된 서명이다.
@@ -397,7 +362,7 @@ int ecdsa_p256_verify(const void *msg, size_t len, const ecdsa_p256_t *_Q, const
      * 5. (x1, y1) = u1*G + u2*Q. 만일 (x1, y1) = O이면 잘못된서명이다.
      */
     ecdsa_p256_t R, T1, T2;
-    point_scalar_mul(&T1, u1, G);
+    point_scalar_mul(&T1, u1, &G);
     point_scalar_mul(&T2, u2, _Q);
     point_add(&R, &T1, &T2);
 
