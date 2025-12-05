@@ -243,7 +243,19 @@ void ecdsa_p256_clear(void)
  */
 void ecdsa_p256_key(void *d, ecdsa_p256_t *Q)
 {
+    unsigned char buf[ECDSA_P256/8];
+    mpz_t dd;
 
+    mpz_init(dd);
+    do {
+        arc4random_buf(buf, sizeof(buf));
+        mpz_import(dd, sizeof(buf), 1, 1, 0, 0, buf);
+        mpz_mod(dd, dd, n);
+    } while (mpz_cmp_ui(dd, 0) == 0);
+
+    mpz_to_bytes(d, dd);
+    ecdsa_p256_scalar_mul(Q, dd, G);
+    mpz_clear(dd);
 }
 
 /*
