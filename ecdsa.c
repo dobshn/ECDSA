@@ -189,7 +189,7 @@ cleanup:
 }
 
 /*
- * P-256 타원 곡선 위에서 double-addition 알고리즘을 사용해 점 P를 k번 더한 결과를 R에 저장한다.
+ * P-256 타원 곡선 위에서 double-addition 알고리즘을 사용해 점 P를 z번 더한 결과를 R에 저장한다.
  */
 static void point_scalar_mul(ecdsa_p256_t *R, const mpz_t z, const ecdsa_p256_t *P)
 {
@@ -214,7 +214,7 @@ static void point_scalar_mul(ecdsa_p256_t *R, const mpz_t z, const ecdsa_p256_t 
  *           SHA2 연산            *
  * ============================= */
 
- /*
+/*
  * SHA-2 함수의 인덱스를 입력으로 받아 그 함수의 출력 바이트를 출력한다.
  */
 static size_t sha2_hLen(int sha2_ndx)
