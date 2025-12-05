@@ -53,11 +53,17 @@ static void mpz_mulm_ui(mpz_t rop, const mpz_t a, const unsigned long int b, con
     mpz_mod(rop, rop, m);
 }
 
+/*
+ * P-256의 고정된 32바이트 빅 엔디안 배열을 GMP 정수로 내보낸다.
+ */
 static void mpz_from_bytes(mpz_t z, const void *bytes)
 {
     mpz_import(z, ECDSA_P256/8, 1, 1, 0, 0, bytes);
 }
 
+/*
+ * GMP 정수를 P-256의 고정된 32바이트 빅 엔디안 배열로 내보낸다.
+ */
 static void bytes_from_mpz(void *bytes, const mpz_t z)
 {
     unsigned char buf[ECDSA_P256/8] = {0};
@@ -72,29 +78,45 @@ static void bytes_from_mpz(void *bytes, const mpz_t z)
  *          point 연산            *
  * ============================= */
 
+/*
+ * P-256 상의 점의 x, y 좌표를 mpz_t 타입으로 저장한다.
+ */
 static void mpz_from_point(mpz_t x, mpz_t y, const ecdsa_p256_t *P)
 {
     mpz_from_bytes(x, P->x);
     mpz_from_bytes(y, P->y);
 }
 
+/*
+ * mpz_t 타입의 x, y 좌표를 P-256 상의 점으로 저장한다.
+ */
 static void point_from_mpz(ecdsa_p256_t *P, const mpz_t x, const mpz_t y)
 {
     bytes_from_mpz(P->x, x);
     bytes_from_mpz(P->y, y);
 }
 
+/*
+ * 주어진 점 P를 무한대 점(Point at Infinity, O)으로 설정한다.
+ */
 static void set_point_infinite(ecdsa_p256_t *P)
 {
     memset(P, 0, sizeof(ecdsa_p256_t));
 }
 
+/*
+ * 주어진 점 P가 무한대 점(Point at Infinity, O)인지 확인한다.
+ * 무한대 점이면 1, 아니면 0을 반환한다.
+ */
 static int is_point_infinite(const ecdsa_p256_t *P)
 {
     static const ecdsa_p256_t INF = {0};
     return memcmp(P, &INF, sizeof(ecdsa_p256_t)) == 0;
 }
 
+/*
+ * P-256 타원 곡선 위에서 두 점 P와 Q를 더한 결과를 R에 저장한다.
+ */
 static void point_add(ecdsa_p256_t *R, const ecdsa_p256_t *P, const ecdsa_p256_t *Q)
 {
     // P, Q중 어느 한 점이라도 무한대 점이라면, 상대방을 반환한다.
@@ -166,6 +188,9 @@ cleanup:
     mpz_clears(Rx, Ry, Px, Py, Qx, Qy, lambda, t1, t2, NULL);
 }
 
+/*
+ * P-256 타원 곡선 위에서 double-addition 알고리즘을 사용해 점 P를 k번 더한 결과를 R에 저장한다.
+ */
 static void point_scalar_mul(ecdsa_p256_t *R, const mpz_t z, const ecdsa_p256_t *P)
 {
     mpz_t zz;
@@ -189,6 +214,9 @@ static void point_scalar_mul(ecdsa_p256_t *R, const mpz_t z, const ecdsa_p256_t 
  *           SHA2 연산            *
  * ============================= */
 
+ /*
+ * SHA-2 함수의 인덱스를 입력으로 받아 그 함수의 출력 바이트를 출력한다.
+ */
 static size_t sha2_hLen(int sha2_ndx)
 {
     switch (sha2_ndx)
@@ -203,6 +231,9 @@ static size_t sha2_hLen(int sha2_ndx)
     return 0;
 }
 
+/*
+ * SHA-2 함수의 인덱스로 종류를 선택해 호출한다.
+ */
 static void sha2(const unsigned char *msg, unsigned int len, unsigned char *digest, int sha2_ndx)
 {
     switch (sha2_ndx)
@@ -220,6 +251,10 @@ static void sha2(const unsigned char *msg, unsigned int len, unsigned char *dige
  *          ecdsa 연산            *
  * ============================= */
 
+/*
+ * Initialize 256 bit ECDSA parameters
+ * 시스템파라미터 p, n, G의 공간을 할당하고 값을 초기화한다.
+ */
 void ecdsa_p256_init(void)
 {
     mpz_t Gx, Gy;
@@ -234,11 +269,19 @@ void ecdsa_p256_init(void)
     mpz_clears(Gx, Gy, NULL);
 }
 
+/*
+ * Clear 256 bit ECDSA parameters
+ * 할당된 파라미터 공간을 반납한다.
+ */
 void ecdsa_p256_clear(void)
 {
     mpz_clears(p, n, NULL);
 }
 
+/*
+ * ecdsa_p256_key() - generates Q = dG
+ * 사용자의 개인키와 공개키를 무작위로 생성한다.
+ */
 void ecdsa_p256_key(void *d, ecdsa_p256_t *Q)
 {
     unsigned char buf[ECDSA_P256/8];
@@ -257,6 +300,13 @@ void ecdsa_p256_key(void *d, ecdsa_p256_t *Q)
     mpz_clear(dd);
 }
 
+/*
+ * ecdsa_p256_sign(msg, len, d, r, s) - ECDSA Signature Generation
+ * 길이가 len 바이트인 메시지 m을 개인키 d로 서명한 결과를 r, s에 저장한다.
+ * sha2_ndx는 사용할 SHA-2 해시함수 색인 값으로 SHA224, SHA256, SHA384, SHA512,
+ * SHA512_224, SHA512_256 중에서 선택한다. r과 s의 길이는 256비트이어야 한다.
+ * 성공하면 0, 그렇지 않으면 오류 코드를 넘겨준다.
+ */
 int ecdsa_p256_sign(const void *msg, size_t len, const void *d, void *_r, void *_s, int sha2_ndx)
 {
     if ((sha2_ndx == SHA224 || sha2_ndx == SHA256) && len >= 0x2000000000000000) return ECDSA_MSG_TOO_LONG;
@@ -324,6 +374,12 @@ int ecdsa_p256_sign(const void *msg, size_t len, const void *d, void *_r, void *
     return 0;
 }
 
+/*
+ * ecdsa_p256_verify(msg, len, Q, r, s) - ECDSA signature veryfication
+ * It returns 0 if valid, nonzero otherwise.
+ * 길이가 len 바이트인 메시지 m에 대한 서명이 (r,s)가 맞는지 공개키 Q로 검증한다.
+ * 성공하면 0, 그렇지 않으면 오류 코드를 넘겨준다.
+ */
 int ecdsa_p256_verify(const void *msg, size_t len, const ecdsa_p256_t *_Q, const void *_r, const void *_s, int sha2_ndx)
 {
     if ((sha2_ndx == SHA224 || sha2_ndx == SHA256) && len >= 0x2000000000000000) return ECDSA_MSG_TOO_LONG;
