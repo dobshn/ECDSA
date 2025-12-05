@@ -266,7 +266,7 @@ void ecdsa_p256_init(void)
  */
 void ecdsa_p256_clear(void)
 {
-    mpz_clears(p, n);
+    mpz_clears(p, n, NULL);
     free(G);
 }
 
