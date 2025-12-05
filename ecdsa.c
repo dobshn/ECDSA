@@ -360,4 +360,76 @@ int ecdsa_p256_sign(const void *msg, size_t len, const void *d, void *_r, void *
  */
 int ecdsa_p256_verify(const void *msg, size_t len, const ecdsa_p256_t *_Q, const void *_r, const void *_s, int sha2_ndx)
 {
+    /*
+     * 1. r과 s가 [1, n−1] 사이에 있지 않으면 잘못된 서명이다.
+     */
+    mpz_t r, s;
+    mpz_inits(r, s, NULL);
+    mpz_import(r, ECDSA_P256/8, 1, 1, 0, 0, _r);
+    mpz_import(s, ECDSA_P256/8, 1, 1, 0, 0, _s);
+
+    // r < 0이거나, r > n이거나, s < 0이거나, s > n이면 잘못된 서명
+    if (mpz_cmp_ui(r, 0) <= 0 || mpz_cmp(r, n) >= 0 || mpz_cmp_ui(s, 0) <= 0 || mpz_cmp(s, n) >= 0) {
+        mpz_clears(r, s, NULL);
+        return ECDSA_SIG_INVALID;
+    }
+
+    /*
+     * 2. e = H(m). H()는 서명에서 사용한 해시함수와 같다.
+     */
+    size_t hLen = sha2_hLen(sha2_ndx);
+    unsigned char *digest = malloc(hLen);
+    sha2(msg, len, digest, sha2_ndx);
+
+    mpz_t e;
+    mpz_init(e);
+    mpz_import(e, hLen, 1, 1, 0, 0, digest);
+    
+    /*
+     * 3. e의 길이가 n의 길이(256비트)보다 길면 뒷 부분은 자른다. bitlen(e)<=bitlen(n)
+     */
+    size_t eLen = mpz_sizeinbase(e, 2);
+    if (eLen > ECDSA_P256) mpz_fdiv_q_2exp(e, e, eLen - ECDSA_P256);
+
+    /*
+     * 4. u1 = e * s^{-1} mod n, u2 = r * s^{−1} mod n.
+     */
+    mpz_t s_inv, u1, u2;
+    mpz_inits(s_inv, u1, u2, NULL);
+
+    mpz_invert(s_inv, s, n);
+    mpz_mulm(u1, e, s_inv, n);
+    mpz_mulm(u2, r, s_inv, n);
+
+    /*
+     * 5. (x1, y1) = u1*G + u2*Q. 만일 (x1, y1) = O이면 잘못된서명이다.
+     */
+    ecdsa_p256_t R, T1, T2;
+    ecdsa_p256_scalar_mul(&T1, u1, G);
+    ecdsa_p256_scalar_mul(&T2, u2, _Q);
+    ecdsa_p256_point_add(&R, &T1, &T2);
+
+    if (is_infinite(&R)) {
+        mpz_clears(r, s, e, s_inv, u1, u2, NULL);
+        free(digest);
+        return ECDSA_SIG_INVALID;
+    }
+
+    /*
+     * 6. r = x1 (mod n)이면 올바른 서명이다.
+     */
+    mpz_t x1;
+    mpz_init(x1);
+    mpz_import(x1, ECDSA_P256/8, 1, 1, 0, 0, R.x);
+    mpz_mod(x1, x1, n);
+
+    /*
+     * 정리 및 반환
+     */
+    int ret = (mpz_cmp(r, x1) == 0) ? 0 : ECDSA_SIG_MISMATCH;
+
+    mpz_clears(r, s, e, s_inv, u1, u2, x1, NULL);
+    free(digest);
+
+    return ret;
 }
