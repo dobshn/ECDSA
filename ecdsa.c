@@ -19,55 +19,13 @@
 static mpz_t p, n;
 static ecdsa_p256_t *G;
 
-/*
- * SHA-2 함수의 인덱스를 입력으로 받아 그 함수의 출력 바이트를 출력한다.
- */
-static size_t sha2_hLen(int sha2_ndx)
-{
-    switch (sha2_ndx)
-    {
-    case SHA224:        return SHA224_DIGEST_SIZE;
-    case SHA256:        return SHA256_DIGEST_SIZE;
-    case SHA384:        return SHA384_DIGEST_SIZE;
-    case SHA512:        return SHA512_DIGEST_SIZE;
-    case SHA512_224:    return SHA224_DIGEST_SIZE;
-    case SHA512_256:    return SHA256_DIGEST_SIZE;
-    }
-    return 0;
-}
-
-/*
- * SHA-2 함수의 인덱스로 종류를 선택해 호출한다.
- */
-static void sha2(const unsigned char *message, unsigned int len, unsigned char *digest, int sha2_ndx)
-{
-    switch (sha2_ndx)
-    {
-    case SHA224:        sha224(message, len, digest);       break;
-    case SHA256:        sha256(message, len, digest);       break;
-    case SHA384:        sha384(message, len, digest);       break;
-    case SHA512:        sha512(message, len, digest);       break;
-    case SHA512_224:    sha512_224(message, len, digest);   break;
-    case SHA512_256:    sha512_256(message, len, digest);   break;
-    }
-}
-
-static int too_long(size_t len, int sha2_ndx)
-{
-    if ((sha2_ndx == SHA224 || sha2_ndx == SHA256) &&
-        len > 0x1fffffffffffffffULL) return 1;
-    return 0;
-}
+/* ============================= *
+ *          mpz_t 연산            *
+ * ============================= */
 
 static void mpz_addm(mpz_t rop, const mpz_t a, const mpz_t b, const mpz_t m)
 {
     mpz_add(rop, a, b);
-    mpz_mod(rop, rop, m);
-}
-
-static void mpz_addm_ui(mpz_t rop, const mpz_t a, const unsigned long int b, const mpz_t m)
-{
-    mpz_add_ui(rop, a, b);
     mpz_mod(rop, rop, m);
 }
 
@@ -95,95 +53,90 @@ static void mpz_mulm_ui(mpz_t rop, const mpz_t a, const unsigned long int b, con
     mpz_mod(rop, rop, m);
 }
 
-/*
- * GMP 정수를 P-256의 고정된 32바이트 빅 엔디안 배열로 내보낸다.
- */
-static void mpz_to_bytes(void *bytes, const mpz_t z)
+static void mpz_from_bytes(mpz_t z, const void *bytes)
 {
-    unsigned char buf[ECDSA_P256/8] = {0};
+    mpz_import(z, ECDSA_P256/8, 1, 1, 0, 0, bytes);
+}
+
+static void bytes_from_mpz(void *bytes, const mpz_t z)
+{
+    unsigned char tmp[ECDSA_P256/8] = {0};
     size_t count = 0;
 
-    mpz_export(buf, &count, 1, 1, 0, 0, z);
+    mpz_export(tmp, &count, 1, 1, 0, 0, z);
     memset(bytes, 0, ECDSA_P256/8);
-    memcpy((unsigned char *)bytes + (ECDSA_P256/8 - count), buf, count);
+    memcpy((unsigned char *)bytes + (ECDSA_P256/8 - count), tmp, count);
 }
 
-/*
- * 주어진 점 P를 무한대 점(Point at Infinity, O)으로 설정한다.
- */
-static void set_infinite(ecdsa_p256_t *R)
+/* ============================= *
+ *          point 연산            *
+ * ============================= */
+
+static void mpz_from_point(mpz_t x, mpz_t y, const ecdsa_p256_t *P)
 {
-    *R = (ecdsa_p256_t){0};
+    mpz_from_bytes(x, P->x);
+    mpz_from_bytes(y, P->y);
 }
 
-/*
- * 주어진 점 P가 무한대 점(Point at Infinity, O)인지 확인한다.
- * 무한대 점이면 1, 아니면 0을 반환한다.
- */
-static int is_infinite(const ecdsa_p256_t *P)
+static void point_from_mpz(ecdsa_p256_t *P, const mpz_t x, const mpz_t y)
 {
-    const unsigned char *p = (const unsigned char *)P;
-    for (size_t i = 0; i < sizeof(ecdsa_p256_t); ++i) {
-        if (p[i] != 0) return 0;
-    }
-    return 1;
+    bytes_from_mpz(P->x, x);
+    bytes_from_mpz(P->y, y);
 }
 
-/*
- * P-256 타원 곡선 위에서 두 점 P와 Q를 더하여 결과를 R에 저장한다.
- * 점 덧셈 규칙은 다음과 같다:
- *  - P 또는 Q가 무한대 점이면, 다른 점을 반환한다.
- *  - P.x == Q.x:
- *      * P.y == Q.y 이면 점 배가(Point Doubling)를 수행한다.
- *      * P.y != Q.y 이면 결과는 무한대 점이다.
- *  - 그 외에는 일반적인 점 덧셈(Point Addition) 공식을 사용한다.
- */
-static int ecdsa_p256_point_add(ecdsa_p256_t *R, const ecdsa_p256_t *P, const ecdsa_p256_t *Q)
+static void set_point_infinite(ecdsa_p256_t *P)
+{
+    memset(P, 0, sizeof(ecdsa_p256_t));
+}
+
+static int is_point_infinite(const ecdsa_p256_t *P)
+{
+    static const ecdsa_p256_t INF = {0};
+    return memcmp(P, &INF, sizeof(ecdsa_p256_t)) == 0;
+}
+
+static void point_add(ecdsa_p256_t *R, const ecdsa_p256_t *P, const ecdsa_p256_t *Q)
 {
     // P, Q중 어느 한 점이라도 무한대 점이라면, 상대방을 반환한다.
-    if (is_infinite(P)) {
+    if (is_point_infinite(P)) {
         *R = *Q;
-        return 0;
+        return;
     }
-    if (is_infinite(Q)) {
+    if (is_point_infinite(Q)) {
         *R = *P;
-        return 0;
+        return;
     }
 
-    mpz_t Rx, Ry, Px, Py, Qx, Qy;
-    mpz_t lambda, t1, t2;
+    mpz_t Rx, Ry, Px, Py, Qx, Qy, lambda, t1, t2;
+    mpz_inits(Rx, Ry, Px, Py, Qx, Qy, lambda, t1, t2, NULL);
 
-    mpz_inits(Rx, Ry, Px, Py, Qx, Qy, NULL);
-    mpz_inits(lambda, t1, t2, NULL);
-
-    mpz_import(Px, ECDSA_P256/8, 1, 1, 0, 0, P->x);
-    mpz_import(Py, ECDSA_P256/8, 1, 1, 0, 0, P->y);
-    mpz_import(Qx, ECDSA_P256/8, 1, 1, 0, 0, Q->x);
-    mpz_import(Qy, ECDSA_P256/8, 1, 1, 0, 0, Q->y);
+    mpz_from_point(Px, Py, P);
+    mpz_from_point(Qx, Qy, Q);
 
     if (mpz_cmp(Px, Qx) == 0) {
-        // x좌표가 같고, y좌표가 같다 -> 같은 점이다.
-        if (mpz_cmp(Py, Qy) == 0) {
-            // t1 = (3*Px^2 - 3) mod p
-            mpz_mulm(t1, Px, Px, p);
-            mpz_mulm_ui(t1, t1, 3, p);
-            mpz_subm_ui(t1, t1, 3, p);
+        mpz_addm(t1, Py, Qy, p);
 
-            // t2 = (2*Py)^(-1) mod p
-            mpz_addm(t2, Py, Py, p);
-            mpz_invert(t2, t2, p);
-            
-            // lambda = (3*Px^2 - 3) * (2*Py)^(-1) mod p
-            mpz_mulm(lambda, t1, t2, p);
+        // x좌표가 같고, y좌표의 합이 0이다 -> 무한대 점을 반환한다.
+        if (mpz_sgn(t1) == 0) {
+            set_point_infinite(R);
+            goto cleanup;
         }
-        // x좌표가 같고, y좌표가 다르다 -> 무한대 점을 반환한다.
-        else {
-            set_infinite(R);
-            mpz_clears(Rx, Ry, Px, Py, Qx, Qy, NULL);
-            mpz_clears(lambda, t1, t2, NULL);
-            return 0;
-        }
+
+        // x좌표가 같고, y좌표의 합이 0이 아니다 -> y좌표가 0이 아닌 같은 점이다.
+
+        // t1 = (3*Px^2 - 3) mod p
+        mpz_mulm(t1, Px, Px, p);
+        mpz_mulm_ui(t1, t1, 3, p);
+        mpz_subm_ui(t1, t1, 3, p);
+
+        // t2 = (2*Py)^(-1) mod p
+        mpz_addm(t2, Py, Py, p);
+        mpz_invert(t2, t2, p);
+
+        // lambda = (3*Px^2 - 3) * (2*Py)^(-1) mod p
+        mpz_mulm(lambda, t1, t2, p);
     }
+
     // x좌표가 다르다 -> 서로 다른 두 점이다.
     else {
         // t1 = (Qy - Py) mod p
@@ -192,7 +145,7 @@ static int ecdsa_p256_point_add(ecdsa_p256_t *R, const ecdsa_p256_t *P, const ec
         // t2 = (Qx - Px)^(-1) mod p
         mpz_subm(t2, Qx, Px, p);
         mpz_invert(t2, t2, p);
-
+        
         // lambda = (Qy - Py) * (Qx - Px)^(-1) mod p
         mpz_mulm(lambda, t1, t2, p);
     }
@@ -207,36 +160,69 @@ static int ecdsa_p256_point_add(ecdsa_p256_t *R, const ecdsa_p256_t *P, const ec
     mpz_mulm(Ry, lambda, Ry, p);
     mpz_subm(Ry, Ry, Py, p);
 
-    mpz_to_bytes(R->x, Rx);
-    mpz_to_bytes(R->y, Ry);
+    point_from_mpz(R, Rx, Ry);
 
-    mpz_clears(Rx, Ry, Px, Py, Qx, Qy, NULL);
-    mpz_clears(lambda, t1, t2, NULL);
+cleanup:
+    mpz_clears(Rx, Ry, Px, Py, Qx, Qy, lambda, t1, t2, NULL);
+}
+
+static void point_scalar_mul(ecdsa_p256_t *R, const mpz_t z, const ecdsa_p256_t *P)
+{
+    mpz_t zz;
+    ecdsa_p256_t PP = *P;
+
+    mpz_init_set(zz, z);
+    mpz_mod(zz, zz, n);
+
+    set_point_infinite(R);
+
+    while (mpz_cmp_ui(zz, 0) > 0) {
+        if (mpz_tstbit(zz, 0)) point_add(R, R, &PP);
+        point_add(&PP, &PP, &PP);
+        mpz_fdiv_q_2exp(zz, zz, 1);
+    }
+
+    mpz_clear(zz);
+}
+
+/* ============================= *
+ *           SHA2 연산            *
+ * ============================= */
+
+static size_t sha2_hLen(int sha2_ndx)
+{
+    switch (sha2_ndx)
+    {
+    case SHA224:        return SHA224_DIGEST_SIZE;
+    case SHA256:        return SHA256_DIGEST_SIZE;
+    case SHA384:        return SHA384_DIGEST_SIZE;
+    case SHA512:        return SHA512_DIGEST_SIZE;
+    case SHA512_224:    return SHA224_DIGEST_SIZE;
+    case SHA512_256:    return SHA256_DIGEST_SIZE;
+    }
     return 0;
 }
 
-/**
- * @brief P-256 타원 곡선 위에서 스칼라 k와 점 P를 곱하여 결과 R = kP를 계산한다.
- * @param R 결과 점 kP가 저장될 점 포인터.
- * @param k GMP mpz_t 타입으로 표현된 스칼라.
- * @param P 곱셈을 수행할 입력 점.
- */
-static void ecdsa_p256_scalar_mul(ecdsa_p256_t *R, const mpz_t k, const ecdsa_p256_t *P)
+static void sha2(const unsigned char *msg, unsigned int len, unsigned char *digest, int sha2_ndx)
 {
-    ecdsa_p256_t Q = *P;
-    mpz_t kk;
-
-    mpz_init_set(kk, k);
-    mpz_mod(kk, kk, n);
-    set_infinite(R);
-
-    while (mpz_sgn(kk) > 0) {
-        if (mpz_tstbit(kk, 0)) ecdsa_p256_point_add(R, R, &Q);
-        ecdsa_p256_point_add(&Q, &Q, &Q);
-        mpz_fdiv_q_2exp(kk, kk, 1);
+    switch (sha2_ndx)
+    {
+    case SHA224:        sha224(msg, len, digest);       break;
+    case SHA256:        sha256(msg, len, digest);       break;
+    case SHA384:        sha384(msg, len, digest);       break;
+    case SHA512:        sha512(msg, len, digest);       break;
+    case SHA512_224:    sha512_224(msg, len, digest);   break;
+    case SHA512_256:    sha512_256(msg, len, digest);   break;
     }
+}
 
-    mpz_clear(kk);
+/* ------------------------------ ecdsa 연산 ------------------------------------- */
+
+static int too_long(size_t len, int sha2_ndx)
+{
+    if ((sha2_ndx == SHA224 || sha2_ndx == SHA256) &&
+        len > 0x1fffffffffffffffULL) return 1;
+    return 0;
 }
 
 /*
@@ -256,8 +242,8 @@ void ecdsa_p256_init(void)
     mpz_t Gx, Gy;
     mpz_init_set_str(Gx, "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296", 16);
     mpz_init_set_str(Gy, "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5", 16);
-    mpz_to_bytes(G->x, Gx);
-    mpz_to_bytes(G->y, Gy);
+    bytes_from_mpz(G->x, Gx);
+    bytes_from_mpz(G->y, Gy);
     mpz_clear(Gx);
     mpz_clear(Gy);
 }
@@ -288,8 +274,8 @@ void ecdsa_p256_key(void *d, ecdsa_p256_t *Q)
         mpz_mod(dd, dd, n);
     } while (mpz_cmp_ui(dd, 0) == 0);
 
-    mpz_to_bytes(d, dd);
-    ecdsa_p256_scalar_mul(Q, dd, G);
+    bytes_from_mpz(d, dd);
+    point_scalar_mul(Q, dd, G);
     mpz_clear(dd);
 }
 
@@ -335,7 +321,7 @@ int ecdsa_p256_sign(const void *msg, size_t len, const void *d, void *_r, void *
         if (mpz_cmp_ui(k, 0) == 0) continue;
 
         // kG를 계산한다.
-        ecdsa_p256_scalar_mul(&P, k, G);
+        point_scalar_mul(&P, k, G);
         mpz_import(r, ECDSA_P256/8, 1, 1, 0, 0, P.x);
         mpz_mod(r, r, n);
         if (mpz_cmp_ui(k, 0) == 0) continue;
@@ -347,8 +333,8 @@ int ecdsa_p256_sign(const void *msg, size_t len, const void *d, void *_r, void *
         mpz_mulm(s, k, tmp, n);
     } while (mpz_cmp_ui(s, 0) == 0);
 
-    mpz_to_bytes(_r, r);
-    mpz_to_bytes(_s, s);
+    bytes_from_mpz(_r, r);
+    bytes_from_mpz(_s, s);
 
     free(hash);
     mpz_clears(e, dd, k, r, s, tmp, NULL);
@@ -411,11 +397,11 @@ int ecdsa_p256_verify(const void *msg, size_t len, const ecdsa_p256_t *_Q, const
      * 5. (x1, y1) = u1*G + u2*Q. 만일 (x1, y1) = O이면 잘못된서명이다.
      */
     ecdsa_p256_t R, T1, T2;
-    ecdsa_p256_scalar_mul(&T1, u1, G);
-    ecdsa_p256_scalar_mul(&T2, u2, _Q);
-    ecdsa_p256_point_add(&R, &T1, &T2);
+    point_scalar_mul(&T1, u1, G);
+    point_scalar_mul(&T2, u2, _Q);
+    point_add(&R, &T1, &T2);
 
-    if (is_infinite(&R)) {
+    if (is_point_infinite(&R)) {
         mpz_clears(r, s, e, s_inv, u1, u2, NULL);
         free(digest);
         return ECDSA_SIG_INVALID;
