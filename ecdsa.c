@@ -11,6 +11,7 @@
 #else
 #include <stdlib.h>
 #endif
+#include <string.h>
 #include <gmp.h>
 #include "ecdsa.h"
 #include "sha2.h"
@@ -52,6 +53,20 @@ static void mpz_mulm_ui(mpz_t rop, const mpz_t a, const unsigned long int b, con
 {
     mpz_mul_ui(rop, a, b);
     mpz_mod(rop, rop, m);
+}
+
+/**
+ * @brief GMP 정수를 P-256의 고정된 32바이트 빅 엔디안 배열로 내보낸다.
+ * @param bytes 결과 32바이트가 저장될 출력 버퍼.
+ * @param op 내보낼 GMP 정수.
+ */
+static void mpz_to_bytes(void *bytes, const mpz_t z) {
+    unsigned char buf[ECDSA_P256/8] = {0};
+    size_t count = 0;
+
+    mpz_export(buf, &count, 1, 1, 0, 0, z);
+    memset(bytes, 0, ECDSA_P256/8);
+    memcpy((unsigned char *)bytes + (ECDSA_P256/8 - count), buf, count);
 }
 
 /**
@@ -158,8 +173,8 @@ static int ecdsa_p256_point_add(ecdsa_p256_t *R, const ecdsa_p256_t *P, const ec
     mpz_mulm(Ry, lambda, Ry, p);
     mpz_subm(Ry, Ry, Py, p);
 
-    mpz_export(R->x, NULL, 1, 1, 0, 0, Rx);
-    mpz_export(R->y, NULL, 1, 1, 0, 0, Ry);
+    mpz_to_bytes(R->x, Rx);
+    mpz_to_bytes(R->y, Ry);
 
     mpz_clears(Rx, Ry, Px, Py, Qx, Qy, NULL);
     mpz_clears(lambda, t1, t2, NULL);
@@ -206,8 +221,8 @@ void ecdsa_p256_init(void)
     mpz_t Gx, Gy;
     mpz_init_set_str(Gx, "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296", 16);
     mpz_init_set_str(Gy, "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5", 16);
-    mpz_export(G->x, NULL, 1, 1, 0, 0, Gx);
-    mpz_export(G->y, NULL, 1, 1, 0, 0, Gy);
+    mpz_to_bytes(G->x, Gx);
+    mpz_to_bytes(G->y, Gy);
     mpz_clear(Gx);
     mpz_clear(Gy);
 }
@@ -228,6 +243,7 @@ void ecdsa_p256_clear(void)
  */
 void ecdsa_p256_key(void *d, ecdsa_p256_t *Q)
 {
+
 }
 
 /*
