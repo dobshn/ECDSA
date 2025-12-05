@@ -300,6 +300,56 @@ void ecdsa_p256_key(void *d, ecdsa_p256_t *Q)
  */
 int ecdsa_p256_sign(const void *msg, size_t len, const void *d, void *_r, void *_s, int sha2_ndx)
 {
+    mpz_t e, dd, k, r, s, tmp;
+    mpz_inits(e, dd, k, r, s, tmp, NULL);
+
+    // 𝑒 = 𝐻(𝑚). 𝐻()는 SHA-2 해시함수이다.
+    size_t hLen = sha2_hLen(sha2_ndx);
+    unsigned char *hash = malloc(hLen);
+    sha2(msg, len, hash, sha2_ndx);
+    mpz_import(e, hLen, 1, 1, 0, 0, hash);
+
+    size_t eLen = mpz_sizeinbase(e, 2);
+    if (eLen > ECDSA_P256) {
+        size_t count = eLen - ECDSA_P256;
+        mpz_fdiv_q_2exp(e, e, count);
+    }
+
+    mpz_import(dd, ECDSA_P256/8, 1, 1, 0, 0, d);
+    mpz_mod(dd, dd, n);
+
+    unsigned char buf[ECDSA_P256/8];
+
+    ecdsa_p256_t P;
+
+    do {
+        // k를 랜덤하게 선택한다.
+        // mpz_set_str(k, "09F634B188CEFD98E7EC88B1AA9852D734D0BC272F7D2A47DECC6EBEB375AAD4", 16);
+        arc4random_buf(buf, sizeof(buf));
+        mpz_import(k, ECDSA_P256/8, 1, 1, 0, 0, buf);
+        mpz_mod(k, k, n);
+        if (mpz_cmp_ui(k, 0) == 0) continue;
+
+        // kG를 계산한다.
+        ecdsa_p256_scalar_mul(&P, k, G);
+        mpz_import(r, ECDSA_P256/8, 1, 1, 0, 0, P.x);
+        mpz_mod(r, r, n);
+        if (mpz_cmp_ui(k, 0) == 0) continue;
+
+        // s = k^{-1} * (e + r*d) (mod n)
+        mpz_invert(k, k, n);
+        mpz_mulm(tmp, r, dd, n);
+        mpz_addm(tmp, e, tmp, n);
+        mpz_mulm(s, k, tmp, n);
+    } while (mpz_cmp_ui(s, 0) == 0);
+
+    mpz_to_bytes(_r, r);
+    mpz_to_bytes(_s, s);
+
+    free(hash);
+    mpz_clears(e, dd, k, r, s, tmp, NULL);
+
+    return 0;
 }
 
 /*
