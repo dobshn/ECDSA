@@ -19,6 +19,39 @@
 static mpz_t p, n;
 static ecdsa_p256_t *G;
 
+/**
+ * @brief SHA-2 함수의 인덱스를 입력으로 받아 그 함수의 출력 바이트를 출력한다.
+ */
+static size_t sha2_hLen(int sha2_ndx)
+{
+    switch (sha2_ndx)
+    {
+    case SHA224:        return SHA224_DIGEST_SIZE;
+    case SHA256:        return SHA256_DIGEST_SIZE;
+    case SHA384:        return SHA384_DIGEST_SIZE;
+    case SHA512:        return SHA512_DIGEST_SIZE;
+    case SHA512_224:    return SHA224_DIGEST_SIZE;
+    case SHA512_256:    return SHA256_DIGEST_SIZE;
+    }
+    return 0;
+}
+
+/**
+ * @brief SHA-2 함수의 인덱스로 종류를 선택해 호출한다.
+ */
+static void sha2(const unsigned char *message, unsigned int len, unsigned char *digest, int sha2_ndx)
+{
+    switch (sha2_ndx)
+    {
+    case SHA224:        sha224(message, len, digest);       break;
+    case SHA256:        sha256(message, len, digest);       break;
+    case SHA384:        sha384(message, len, digest);       break;
+    case SHA512:        sha512(message, len, digest);       break;
+    case SHA512_224:    sha512_224(message, len, digest);   break;
+    case SHA512_256:    sha512_256(message, len, digest);   break;
+    }
+}
+
 static void mpz_addm(mpz_t rop, const mpz_t a, const mpz_t b, const mpz_t m)
 {
     mpz_add(rop, a, b);
