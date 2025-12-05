@@ -52,6 +52,12 @@ static void sha2(const unsigned char *message, unsigned int len, unsigned char *
     }
 }
 
+static int too_long(size_t len, int sha2_ndx) {
+    if ((sha2_ndx == SHA224 || sha2_ndx == SHA256) &&
+        len > 0x1fffffffffffffffULL) return 1;
+    return 0; // SHA-384/512 계열은 이 한계보다 넉넉
+}
+
 static void mpz_addm(mpz_t rop, const mpz_t a, const mpz_t b, const mpz_t m)
 {
     mpz_add(rop, a, b);
@@ -300,6 +306,8 @@ void ecdsa_p256_key(void *d, ecdsa_p256_t *Q)
  */
 int ecdsa_p256_sign(const void *msg, size_t len, const void *d, void *_r, void *_s, int sha2_ndx)
 {
+    if (too_long(len, sha2_ndx)) return ECDSA_MSG_TOO_LONG;
+
     mpz_t e, dd, k, r, s, tmp;
     mpz_inits(e, dd, k, r, s, tmp, NULL);
 
@@ -360,6 +368,8 @@ int ecdsa_p256_sign(const void *msg, size_t len, const void *d, void *_r, void *
  */
 int ecdsa_p256_verify(const void *msg, size_t len, const ecdsa_p256_t *_Q, const void *_r, const void *_s, int sha2_ndx)
 {
+    if (too_long(len, sha2_ndx)) return ECDSA_MSG_TOO_LONG;
+    
     /*
      * 1. r과 s가 [1, n−1] 사이에 있지 않으면 잘못된 서명이다.
      */
