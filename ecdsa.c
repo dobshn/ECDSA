@@ -19,8 +19,8 @@
 static mpz_t p, n;
 static ecdsa_p256_t *G;
 
-/**
- * @brief SHA-2 함수의 인덱스를 입력으로 받아 그 함수의 출력 바이트를 출력한다.
+/*
+ * SHA-2 함수의 인덱스를 입력으로 받아 그 함수의 출력 바이트를 출력한다.
  */
 static size_t sha2_hLen(int sha2_ndx)
 {
@@ -36,8 +36,8 @@ static size_t sha2_hLen(int sha2_ndx)
     return 0;
 }
 
-/**
- * @brief SHA-2 함수의 인덱스로 종류를 선택해 호출한다.
+/*
+ * SHA-2 함수의 인덱스로 종류를 선택해 호출한다.
  */
 static void sha2(const unsigned char *message, unsigned int len, unsigned char *digest, int sha2_ndx)
 {
@@ -52,10 +52,11 @@ static void sha2(const unsigned char *message, unsigned int len, unsigned char *
     }
 }
 
-static int too_long(size_t len, int sha2_ndx) {
+static int too_long(size_t len, int sha2_ndx)
+{
     if ((sha2_ndx == SHA224 || sha2_ndx == SHA256) &&
         len > 0x1fffffffffffffffULL) return 1;
-    return 0; // SHA-384/512 계열은 이 한계보다 넉넉
+    return 0;
 }
 
 static void mpz_addm(mpz_t rop, const mpz_t a, const mpz_t b, const mpz_t m)
@@ -94,12 +95,11 @@ static void mpz_mulm_ui(mpz_t rop, const mpz_t a, const unsigned long int b, con
     mpz_mod(rop, rop, m);
 }
 
-/**
- * @brief GMP 정수를 P-256의 고정된 32바이트 빅 엔디안 배열로 내보낸다.
- * @param bytes 결과 32바이트가 저장될 출력 버퍼.
- * @param op 내보낼 GMP 정수.
+/*
+ * GMP 정수를 P-256의 고정된 32바이트 빅 엔디안 배열로 내보낸다.
  */
-static void mpz_to_bytes(void *bytes, const mpz_t z) {
+static void mpz_to_bytes(void *bytes, const mpz_t z)
+{
     unsigned char buf[ECDSA_P256/8] = {0};
     size_t count = 0;
 
@@ -108,20 +108,20 @@ static void mpz_to_bytes(void *bytes, const mpz_t z) {
     memcpy((unsigned char *)bytes + (ECDSA_P256/8 - count), buf, count);
 }
 
-/**
- * @brief 주어진 점 P를 무한대 점(Point at Infinity, O)으로 설정한다.
- * @param R 무한대 점으로 설정할 타원 곡선 점 포인터.
+/*
+ * 주어진 점 P를 무한대 점(Point at Infinity, O)으로 설정한다.
  */
-static void set_infinite(ecdsa_p256_t *R) {
+static void set_infinite(ecdsa_p256_t *R)
+{
     *R = (ecdsa_p256_t){0};
 }
 
-/**
- * @brief 주어진 점 P가 무한대 점(Point at Infinity, O)인지 확인한다.
- * @param P 검사할 타원 곡선 점.
- * @return 무한대 점이면 1 (True), 아니면 0 (False)을 반환한다.
+/*
+ * 주어진 점 P가 무한대 점(Point at Infinity, O)인지 확인한다.
+ * 무한대 점이면 1, 아니면 0을 반환한다.
  */
-static int is_infinite(const ecdsa_p256_t *P) {
+static int is_infinite(const ecdsa_p256_t *P)
+{
     const unsigned char *p = (const unsigned char *)P;
     for (size_t i = 0; i < sizeof(ecdsa_p256_t); ++i) {
         if (p[i] != 0) return 0;
@@ -129,22 +129,17 @@ static int is_infinite(const ecdsa_p256_t *P) {
     return 1;
 }
 
-/**
- * @brief P-256 타원 곡선 위에서 두 점 P와 Q를 더하여 결과를 R에 저장한다.
- *
+/*
+ * P-256 타원 곡선 위에서 두 점 P와 Q를 더하여 결과를 R에 저장한다.
  * 점 덧셈 규칙은 다음과 같다:
  *  - P 또는 Q가 무한대 점이면, 다른 점을 반환한다.
  *  - P.x == Q.x:
  *      * P.y == Q.y 이면 점 배가(Point Doubling)를 수행한다.
  *      * P.y != Q.y 이면 결과는 무한대 점이다.
  *  - 그 외에는 일반적인 점 덧셈(Point Addition) 공식을 사용한다.
- *
- * @param R 결과가 저장될 점 포인터.
- * @param P 첫 번째 입력 점.
- * @param Q 두 번째 입력 점.
- * @return 항상 0을 반환한다.
  */
-static int ecdsa_p256_point_add(ecdsa_p256_t *R, const ecdsa_p256_t *P, const ecdsa_p256_t *Q) {
+static int ecdsa_p256_point_add(ecdsa_p256_t *R, const ecdsa_p256_t *P, const ecdsa_p256_t *Q)
+{
     // P, Q중 어느 한 점이라도 무한대 점이라면, 상대방을 반환한다.
     if (is_infinite(P)) {
         *R = *Q;
@@ -226,7 +221,8 @@ static int ecdsa_p256_point_add(ecdsa_p256_t *R, const ecdsa_p256_t *P, const ec
  * @param k GMP mpz_t 타입으로 표현된 스칼라.
  * @param P 곱셈을 수행할 입력 점.
  */
-static void ecdsa_p256_scalar_mul(ecdsa_p256_t *R, const mpz_t k, const ecdsa_p256_t *P) {
+static void ecdsa_p256_scalar_mul(ecdsa_p256_t *R, const mpz_t k, const ecdsa_p256_t *P)
+{
     ecdsa_p256_t Q = *P;
     mpz_t kk;
 
